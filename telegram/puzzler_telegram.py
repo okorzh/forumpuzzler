@@ -45,13 +45,6 @@ from PIL import ImageFile
 
 # ---- Config ----
 BASE = "https://forum.puzzler.su/"
-LISTING_PATHS = [
-    "search.php?search_id=newposts",
-    "search.php?search_id=active_topics",
-    "search.php?search_id=unreadposts",
-    "search.php?search_id=unanswered,"
-    "",  # homepage fallback
-]
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; puzzler-scraper/10.0)", "Accept-Language": "ru,en;q=0.9"}
 
 MAX_POSTS_TO_SEND = int(os.getenv("MAX_POSTS_TO_SEND", "25"))
@@ -272,7 +265,7 @@ def find_last_page_url(soup, current_url):
     if a_last:
         return urljoin(current_url, a_last["href"])
     max_start, candidate = -1, None
-    for a in soup.find_all("a", href=True):
+    for a in soup.find_all("a", attrs={"role":"button"}, href=True):
         m = re.search(r"[?&]start=(\d+)", a["href"])
         if m:
             st = int(m.group(1))
@@ -391,6 +384,26 @@ def collect_recent_posts(session, within_hours=WITHIN_HOURS):
 
     # Gather topics
     raw_topic_urls = set()
+
+    LISTING_PATHS = [
+        "search.php?search_id=newposts",
+        "search.php?search_id=active_topics",
+        "search.php?search_id=unreadposts",
+        "search.php?search_id=unanswered",
+    ]
+    EXCLUDE_LIST = [39,173,85,25,89,100,242,315,25,90,29,81,127,171,205,229,237,274,
+        302,301,345,346,96,101,102,105,106,109,111,158,182,134,86,55,294,116,117,110,
+        150,192,218,234,253,299,312,324,343,356,361,370,376,337,371,372,373,374,375,
+        364,365,366,367,357,358,359,360,338,339,340,341,342,332,333,334,335,336,
+        326,237,328,329,330,316,317,318,319,320,304,305,306,307,308,309,310,
+        285,290,288,287,289,291,21,152,136,148,193,225,233,255,293,313,322,331,344,]
+
+    # Forum range that can have new puzzles (as of 1 Nov 2025 last forum numer 381)
+    for i in range(7,420):
+        # Excluding forums that are not expected to have new puzzles
+        if i not in EXCLUDE_LIST:
+            LISTING_PATHS += ["viewforum.php?f=" + str(i)]
+
     for path in LISTING_PATHS:
         try:
             full, html_text = fetch(session, urljoin(BASE, path))
@@ -409,6 +422,7 @@ def collect_recent_posts(session, within_hours=WITHIN_HOURS):
 
     for key, topic_url in sorted(topic_map.items()):
         try:
+            logging.info("topic_url = %s", topic_url)
             t_url, t_html = fetch(session, topic_url)
             t_soup = BeautifulSoup(t_html, "html.parser")
             last_url = find_last_page_url(t_soup, t_url)
@@ -438,23 +452,25 @@ def collect_recent_posts(session, within_hours=WITHIN_HOURS):
 
     candidates = sorted(candidates_by_permalink.values(), key=lambda x: x["dt"], reverse=True)
 
-    from collections import defaultdict
+    return candidates
 
-    by_topic = defaultdict(list)
-    for p in candidates:
-        key = p.get("topic_key") or canonical_topic_url(p["permalink"])
-        by_topic[key].append(p)
+    # One per topic currently not running. Previously used to have one port on topic change
+    #from collections import defaultdict
 
-    eligible_one_per_topic = []
-    for key, arr in by_topic.items():
-        # pick the first new post in this thread
-        best = min(arr, key=lambda x: x["dt"])
-        eligible_one_per_topic.append(best)
+    #by_topic = defaultdict(list)
+    #for p in candidates:
+    #    key = p.get("topic_key") or canonical_topic_url(p["permalink"])
+    #    by_topic[key].append(p)
+
+    #eligible_one_per_topic = []
+    #for key, arr in by_topic.items():
+    #    # pick the first new post in this thread
+    #    best = min(arr, key=lambda x: x["dt"])
+    #    eligible_one_per_topic.append(best)
 
     # Sort newest-first for sending
-    eligible_one_per_topic.sort(key=lambda x: x["dt"], reverse=True)
-
-    return eligible_one_per_topic
+    #eligible_one_per_topic.sort(key=lambda x: x["dt"], reverse=True)
+    #return eligible_one_per_topic
 
 # ---- Telegram ----
 def telegram_send_photo(token, chat_id, photo_url, title, url):
